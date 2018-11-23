@@ -161,7 +161,7 @@ async def mark_as_answered(ctx, jdict, clue):
 class GameCog:
 
     async def __before_invoke(self, ctx):
-        print("{0.guild} #{0.channel.id}, {0.author}: {0.content}".format(ctx.message))
+        print("{0.guild} #{0.channel.id}, ({1.hour}:{1.minute}:{1.second}) {0.author}: {0.content}".format(ctx.message, datetime.now()))
 
     def __init__(self, bot):
         self.bot = bot
@@ -401,6 +401,8 @@ class GameCog:
             await question.remove_reaction("🔄", self.bot.user)
         else:
             await question.remove_reaction("🔄", self.bot.user)
+            ctx.message.author = user
+            ctx.message.content = "repeat clue"
             await self.clue.invoke(ctx)
 
     async def daily_double(self, ctx, clue, title):
