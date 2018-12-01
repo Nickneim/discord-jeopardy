@@ -8,8 +8,8 @@ initial_extensions = ['cogs.browser',
                       'cogs.owner',
                       'cogs.others']
 
-prefix = "t."
-bot = commands.Bot(command_prefix="t.")
+prefix = ("t.", "T.")
+bot = commands.Bot(command_prefix=prefix)
 
 if __name__ == '__main__':
     for extension in initial_extensions:
