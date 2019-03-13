@@ -5,7 +5,8 @@ import re
 heard_here_re = re.compile(r'\bheard here[\:]*$', re.IGNORECASE)
 audio_re = re.compile(r'\[audio', re.IGNORECASE)
 seen_here_re = re.compile(r'\bseen here\b', re.IGNORECASE)
-jservice = "http://www.jservice.io/"
+jservice = "http://localhost:3000/"
+
 
 async def jservice_get_json(session, path, params={}):
     print(path, params)
@@ -16,8 +17,12 @@ async def jservice_get_json(session, path, params={}):
         else:
             return None
 
+
 def is_audio_clue(clue):
-    return heard_here_re.search(clue['question']) or audio_re.match(clue['question'])
+    return (heard_here_re.search(clue['question']) or
+            audio_re.match(clue['question']) or
+            clue['question'].endswith(":"))
+
 
 def is_video_clue(clue):
     return seen_here_re.search(clue['question'])
