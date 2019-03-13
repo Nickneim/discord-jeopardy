@@ -13,12 +13,15 @@ tag_re = re.compile(r'<[^>]*>')
 between_parentheses_re = re.compile(r'\([^\)]*\)')
 parentheses_re = re.compile(r'[()]')
 non_letters_re = re.compile(r'\W')
-answer_start_re = re.compile(r"^wh(?:at|ere|o)(?: is|'s|s| are) +")
+answer_start_re = re.compile(r"^(?:wh(?:at|ere|o)(?: is|'s|s| are)|que es|qué es) +")
 answer_starts = ("what is ", "what's ", "whats ", "what are ",
                  "where is ", "where's ", "wheres " "where are ",
                  "who is ", "who's ", "whos ", "who are ",
+                 "que es ", "qué es ",
                  "skip clue")
 
+CATEGORY_AMOUNT = 23411
+CLUE_AMOUNT = 176778
 
 def get_possible_answers(answer):
     answer = tag_re.sub('', answer).strip().lower()
@@ -212,11 +215,15 @@ class GameCog:
         return user.id, user.display_name
 
     async def get_random_clue(self):
-        while True:
-            clue = await jservice_get_json(self.session, 'api/random')
-            clue = clue[0]
-            if is_valid_clue(clue):
-                return clue
+        for i in range(100):
+            clue_id = random.randint(1, CLUE_AMOUNT)
+            clue = await jservice_get_json(self.session, 'clues/{}.json'.format(clue_id))
+            if not clue:
+                continue
+            if not is_valid_clue(clue):
+                continue
+            clue['category'] = await jservice_get_json(self.session, 'categories/{}.json'.format(clue['category_id']))
+            return clue
 
     async def end_jeopardy_clue(self, ctx, jdict, question, clue):
         await mark_as_answered(ctx, jdict, clue)
@@ -613,7 +620,7 @@ class GameCog:
 
     async def get_random_category(self, jdict):
         while True:
-            category_id = random.randint(1,18420)
+            category_id = random.randint(1, CATEGORY_AMOUNT)
             if id_to_index(jdict['categories'], category_id):
                 continue
             category = await jservice_get_json(self.session, 'api/category', {'id':category_id})
