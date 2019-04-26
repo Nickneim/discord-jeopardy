@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 
-class OwnerCog:
+class OwnerCog(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
@@ -22,7 +22,7 @@ class OwnerCog:
 
     @commands.command(name='load', hidden=True)
     @commands.is_owner()
-    async def cog_load(self, ctx, *, cog: str):
+    async def load_cog(self, ctx, *, cog: str):
         """Command which Loads a Module."""
 
         try:
@@ -35,7 +35,7 @@ class OwnerCog:
 
     @commands.command(name='unload', hidden=True)
     @commands.is_owner()
-    async def cog_unload(self, ctx, *, cog: str):
+    async def unload_cog(self, ctx, *, cog: str):
         """Command which Unloads a Module."""
 
         try:
@@ -48,7 +48,7 @@ class OwnerCog:
 
     @commands.command(name='reload', hidden=True)
     @commands.is_owner()
-    async def cog_reload(self, ctx, *, cog: str):
+    async def reload_cog(self, ctx, *, cog: str):
         """Command which Reloads a Module."""
 
         try:

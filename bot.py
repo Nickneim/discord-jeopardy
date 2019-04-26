@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+import logging
 
 import os
 import sys
@@ -8,8 +9,11 @@ import traceback
 initial_extensions = ['cogs.browser',
                       'cogs.game',
                       'cogs.owner',
-                      'cogs.others']
+                      'cogs.others',
+                      'cogs.role']
 
+
+logging.basicConfig(filename='jeopardy.log', level=logging.INFO)
 prefix = ("t.", "T.")
 bot = commands.Bot(command_prefix=prefix)
 

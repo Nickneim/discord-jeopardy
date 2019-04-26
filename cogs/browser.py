@@ -6,7 +6,7 @@ import aiohttp
 import random
 from .utilities import *
 
-class BrowserCog:
+class BrowserCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.CATEGORIES_COUNT = 10

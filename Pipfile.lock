@@ -1,12 +1,10 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "7fb39fee1efe1827f7b876fb05caf51ef48fba18e8e18beff30fa1124c7a97a9"
+            "sha256": "534f524143bcad38fffcdc0574f4c791ce5bbc346f59c65a35cb220185fd4a31"
         },
         "pipfile-spec": 6,
-        "requires": {
-            "python_version": "3.6"
-        },
+        "requires": {},
         "sources": [
             {
                 "name": "pypi",
@@ -18,7 +16,7 @@
     "default": {
         "discord.py": {
             "git": "https://github.com/Rapptz/discord.py",
-            "ref": "1da696258095d5c1171a1cdbe75f56c535c6683e"
+            "ref": "rewrite"
         }
     },
     "develop": {}
