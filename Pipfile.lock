@@ -14,6 +14,10 @@
         ]
     },
     "default": {
+        "discord-py": {
+            "git": "https://github.com/Rapptz/discord.py",
+            "ref": "d37839f38acd79d49bc19ae06d3067a455695e9b"
+        },
         "discord.py": {
             "git": "https://github.com/Rapptz/discord.py",
             "ref": "rewrite"
