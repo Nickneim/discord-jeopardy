@@ -1,5 +1,6 @@
 import discord
 import asyncio
+import sqlite3
 from discord.ext import commands
 
 
@@ -22,12 +23,17 @@ class RoleCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.guilds = {}
+        self.database = sqlite3.connect('database.db')
+        self.db_cursor = self.database.cursor()
+        self.db_cursor.execute("""CREATE TABLE IF NOT EXISTS autoroles
+                                  (role integer, guild integer)""")
+        self.database.commit()
 
 
     @commands.Cog.listener()
     async def on_member_join(self, member):
-        roles = self.guilds.get(member.guild.id, [])
-        roles = [member.guild.get_role(role_id) for role_id in roles]
+        roles = self.db_cursor.execute(f'SELECT role FROM autoroles WHERE guild={member.guild.id}').fetchall()
+        roles = [member.guild.get_role(role_id) for (role_id,) in roles]
         for role in roles:
             if role is None:
                 continue
@@ -39,31 +45,30 @@ class RoleCog(commands.Cog):
 
     @commands.command()
     async def autorole(self, ctx, *, role : RoleLowerConverter):
-        if not ctx.guild.id not in self.guilds:
-            self.guilds[ctx.guild.id] = []
-        try:
-            self.guilds[ctx.guild.id].remove(role.id)
-            return await ctx.send(f"{role} is no longer an automatic role.")
-        except ValueError:
-            pass
         if not ctx.author.permissions_in(ctx.channel).manage_roles:
             return await ctx.send("You can't manage roles.")
         if role >= ctx.author.top_role:
             return await ctx.send("You can't add that role.")
+        role_exists = self.db_cursor.execute(f'SELECT role FROM autoroles WHERE role={role.id} AND guild={ctx.guild.id}').fetchall()
+        if role_exists:
+            self.db_cursor.execute(f'DELETE FROM autoroles WHERE role={role.id} AND guild={ctx.guild.id}')
+            self.database.commit()
+            return await ctx.send(f"{role} is no longer an automatic role.")
         if role >= ctx.me.top_role:
             return await ctx.send("I can't add that role.")
         if role.managed:
             return await ctx.send("I can't add managed roles.")
-        self.guilds[ctx.guild.id].append(role.id)
+        self.db_cursor.execute(f'INSERT INTO autoroles VALUES ({role.id}, {ctx.guild.id})')
+        self.database.commit()
         await ctx.send(f"{role} is now an automatic role.")
 
 
     @commands.command()
     async def autoroles(self, ctx):
-        roles = self.guilds.get(ctx.guild.id)
+        roles = self.db_cursor.execute(f'SELECT role FROM autoroles WHERE guild={ctx.guild.id}').fetchall()
         if not roles:
             return await ctx.send("Your server has no automatic roles.")
-        roles = [str(ctx.guild.get_role(role_id)) for role_id in roles]
+        roles = [str(ctx.guild.get_role(role_id)) for (role_id,) in roles]
         await ctx.send(roles)
 
 
