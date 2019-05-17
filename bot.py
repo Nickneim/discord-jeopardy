@@ -10,7 +10,8 @@ initial_extensions = ['cogs.browser',
                       'cogs.game',
                       'cogs.owner',
                       'cogs.others',
-                      'cogs.role']
+                      'cogs.role',
+                      'cogs.autodelete']
 
 
 logging.basicConfig(filename='jeopardy.log', level=logging.INFO)

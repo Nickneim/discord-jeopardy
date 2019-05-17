@@ -4,6 +4,7 @@ from discord.ext import commands
 import aiohttp
 import asyncio
 import random
+import logging
 import re
 from difflib import SequenceMatcher
 from datetime import datetime
@@ -164,7 +165,7 @@ async def mark_as_answered(ctx, jdict, clue):
 class GameCog(commands.Cog):
 
     async def __before_invoke(self, ctx):
-        print("{0.guild} #{0.channel.id}, ({1.hour}:{1.minute}:{1.second}) {0.author}: {0.content}".format(ctx.message, datetime.now()))
+        logging.info("{0.guild} #{0.channel.id}, ({1.hour}:{1.minute}:{1.second}) {0.author}: {0.content}".format(ctx.message, datetime.now()))
 
     def __init__(self, bot):
         self.bot = bot
@@ -176,7 +177,7 @@ class GameCog(commands.Cog):
 
     def get_channel(self, channel):
         if channel not in self.channels:
-            print("Defining channel", channel)
+            logging.info(f"Defining channel {channel}")
             self.channels[channel] = {
                 'button mode' : False,
                 'infinite mode' : True,
@@ -852,16 +853,13 @@ class GameCog(commands.Cog):
             leader = jdict['players'][0]
             jdict['leader'] = leader['id']
             n = random.randint(0,29)
-            print(n//6, n%5)
             jdict['daily doubles'][0] = jdict['clues'][n//6][n%5]['id']
             n = random.randint(30,59)
-            print(n//6, n%5)
             jdict['daily doubles'][1] = jdict['clues'][n//6][n%5]['id']
             newn = random.randint(30,59)
             while newn == n:
                 newn = random.randint(30,59)
             n = newn
-            print(n//6, n%5)
             jdict['daily doubles'][2] = jdict['clues'][n//6][n%5]['id']
             jdict['start time'] = datetime.utcnow()
             jdict['round'] = 1

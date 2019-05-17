@@ -31,7 +31,6 @@ class OthersCog(commands.Cog):
         if self.owner is None:
             appinfo = await self.bot.application_info()
             self.owner = appinfo.owner
-        print(self.owner)
         await self.owner.send("{0.guild} #{0.channel.id}, {0.author}: {1}".format(ctx.message, msg))
 
     @commands.command(hidden=True)

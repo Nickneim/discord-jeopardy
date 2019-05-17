@@ -4,6 +4,7 @@ from discord.ext import commands
 import asyncio
 import aiohttp
 import random
+import logging
 from .utilities import *
 
 class BrowserCog(commands.Cog):
@@ -15,7 +16,7 @@ class BrowserCog(commands.Cog):
 
 
     async def __before_invoke(self, ctx):
-        print("{0.guild} #{0.channel.id}, {0.author}: {0.content}".format(ctx.message))
+        logging.info("{0.guild} #{0.channel.id}, {0.author}: {0.content}".format(ctx.message))
 
     def total_categories_pages(self):
         return (self.CATEGORIES_AMOUNT - 1) // self.CATEGORIES_COUNT + 1

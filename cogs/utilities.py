@@ -1,6 +1,6 @@
 import aiohttp
 import re
-
+import logging
 
 heard_here_re = re.compile(r'\bheard here[\:]*$', re.IGNORECASE)
 audio_re = re.compile(r'\[audio', re.IGNORECASE)
@@ -10,7 +10,8 @@ jservice = "http://jservice.io/"
 
 
 async def jservice_get_json(session, path, params={}):
-    print(path, params)
+    logging.info(path)
+    logging.info(params)
     async with session.get(jservice + path, params=params) as r:
         if r.status == 200:
             js = await r.json()
