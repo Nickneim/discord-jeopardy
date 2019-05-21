@@ -12,7 +12,7 @@ class RoleLowerConverter(commands.RoleConverter):
             roles = [role for role in ctx.guild.roles if role < ctx.me.top_role]
             roles = {str(role).lower():role for role in roles}
             result = roles.get(argument.lower())
-        
+
         if result is None:
             raise commands.BadArgument('Role "{}" not found.'.format(argument))
         return result
@@ -22,12 +22,19 @@ class RoleCog(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.guilds = {}
+        self.reaction_roles = {}
         self.database = sqlite3.connect('database.db')
         self.db_cursor = self.database.cursor()
         self.db_cursor.execute("""CREATE TABLE IF NOT EXISTS autoroles
                                   (role integer, guild integer)""")
+        self.db_cursor.execute("""CREATE TABLE IF NOT EXISTS reactionroles
+                                  (role integer, message integer, channel integer)""")
         self.database.commit()
+        reaction_roles = self.db_cursor.execute(f'SELECT role, message, channel FROM reactionroles')
+        for (role, message, channel) in reaction_roles:
+            if message not in self.reaction_roles:
+                self.reaction_roles[message] = {}
+            self.reaction_roles[message][channel] = role
 
 
     @commands.Cog.listener()
@@ -132,7 +139,7 @@ class RoleCog(commands.Cog):
             return await ctx.send("Sorry, something went wrong.")
         if not ctx.author.display_name.endswith(f" ({role})"):
             return await ctx.send("Role removed.")
-        
+
         message = await ctx.send("Role removed. Would you like to change your nickname to reflect it?")
         await message.add_reaction('✅')
         await message.add_reaction('❎')
@@ -212,6 +219,78 @@ class RoleCog(commands.Cog):
         except discord.HTTPException:
             return await ctx.send("Sorry, something went wrong.")
         return await ctx.send("Tags shown.")
+
+
+    @commands.command()
+    async def reaction_role(self, ctx, role: RoleLowerConverter):
+        if not ctx.author.permissions_in(ctx.channel).manage_roles:
+            return await ctx.send("You can't manage roles.")
+        if role >= ctx.author.top_role:
+            return await ctx.send("You can't add that role.")
+        if role >= ctx.me.top_role:
+            return await ctx.send("I can't add that role.")
+        if role.managed:
+            return await ctx.send("I can't add managed roles.")
+        message = await ctx.send(f"You are {role}")
+        await message.add_reaction('✅')
+        await message.add_reaction('❎')
+        if message.id not in self.reaction_roles:
+            self.reaction_roles[message.id] = {ctx.channel.id : role.id}
+        else:
+            self.reaction_roles[message.id][ctx.channel.id] = role.id
+        self.db_cursor.execute(f'INSERT INTO reactionroles VALUES ({role.id}, {message.id}, {ctx.channel.id})')
+        self.database.commit()
+        await ctx.send("Reaction role added.", delete_after=3)
+
+
+    @reaction_role.error
+    async def reaction_role_error(self, ctx, error):
+        if isinstance(error, commands.BadArgument):
+            return await ctx.send("That's not a role.")
+        elif isinstance(error, commands.MissingRequiredArgument):
+            return await ctx.send(f"Usage: {ctx.invoked_with} <role>")
+        raise error
+
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, raw_reaction):
+        message_id = raw_reaction.message_id
+        if message_id not in self.reaction_roles:
+            return
+
+        user_id = raw_reaction.user_id
+        if self.bot.user.id == user_id:
+            return
+
+        role_id = self.reaction_roles[message_id].get(raw_reaction.channel_id)
+        if role_id is None:
+            return
+
+        emoji = str(raw_reaction.emoji)
+        if emoji == '✅':
+            add_role = True
+        elif emoji == '❎':
+            add_role = False
+        else:
+            return
+
+        guild = self.bot.get_guild(raw_reaction.guild_id)
+        if guild is None:
+            return
+
+        member = guild.get_member(user_id)
+        if member is None:
+            return
+
+        role = guild.get_role(role_id)
+        if role is None:
+            return
+
+        if add_role:
+            await member.add_roles(role)
+        else:
+            await member.remove_roles(role)
+
 
 def setup(bot):
     bot.add_cog(RoleCog(bot))
