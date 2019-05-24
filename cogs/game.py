@@ -45,6 +45,13 @@ class Clue:
     invalid_count: int = 0
     answered: bool = False
     category_title: str = "NO CATEGORY"
+    possible_answers: list = dataclasses.field(default_factory=list)
+
+
+    def __post_init__(self):
+        if self.value is None:
+            self.value = 0
+
 
     def question_to_str(self):
         return ('The category is **{0.category_title}** for ${0.value}: ' +
@@ -52,48 +59,59 @@ class Clue:
                ).format(self, self.airdate[5:7], self.airdate[2:4])
 
 
-
-def fix_id(clue):
-    clue['id_'] = clue['id']
-    del clue['id']
-    return clue
-
-
-def get_possible_answers(answer):
-    answer = tag_re.sub('', answer).strip().lower()
-    if answer[0] == "(":
-        return [between_parentheses_re.sub('', answer), parentheses_re.sub('', answer)]
-    elif answer[-1] == ")":
-        start = answer.find("(")
-        if answer[start+1:].startswith("or "):
-            return [answer[:start], answer[start+4:-1]]
-        else:
-            return [between_parentheses_re.sub('', answer), parentheses_re.sub('', answer)]
-    else:
-        return [answer]
-
-
-def is_correct_answer(correct_answers, answer, number_clue, similarity_ratio=0.65):
-    close_answer = False
-    for i, correct in enumerate(correct_answers):
-        if number_clue[i]:
-            try:
-                if int(answer) == correct:
-                    return True
-            except ValueError:
-                pass
-        elif similarity_ratio <= SequenceMatcher(None, correct, answer).ratio():
-            return True
-        elif not close_answer:
-            for word in answer.split():
-                if not re.search(rf'\b{re.escape(word)}\b', correct):
-                    break
+    def update_possible_answers(self):
+        answer = tag_re.sub('', self.answer).strip().lower()
+        if answer[0] == "(":
+            answers = [between_parentheses_re.sub('', answer),
+                                     parentheses_re.sub('', answer)]
+        elif answer[-1] == ")":
+            start = answer.find("(")
+            if answer[start+1:].startswith("or "):
+                answers = [answer[:start], answer[start+4:-1]]
             else:
-                close_answer = True
-    if close_answer:
-        return None
-    else:
-        return False
+                answers = [between_parentheses_re.sub('', answer),
+                                         parentheses_re.sub('', answer)]
+        else:
+            answers = [answer]
+        for i in range(len(answers)):
+            try:
+                answer = int(answers[i])
+            except ValueError:
+                continue
+            else:
+                answers[i] = answer
+        self.possible_answers = answers
+
+
+    def is_correct_answer(self, answer, similarity_ratio=0.65):
+        close_answer = False
+        for correct_answer in self.possible_answers:
+            if isinstance(correct_answer, int):
+                try:
+                    if int(answer) == correct_answer:
+                        return True
+                except ValueError:
+                    pass
+            elif similarity_ratio <= SequenceMatcher(None, correct_answer,
+                                                     answer).ratio():
+                return True
+            elif not close_answer:
+                for word in answer.split():
+                    if not re.search(rf'\b{re.escape(word)}\b', correct_answer):
+                        break
+                else:
+                    close_answer = True
+        if close_answer:
+            return None
+        else:
+            return False
+
+
+def fix_id(dictionary):
+    dictionary['id_'] = dictionary['id']
+    del dictionary['id']
+    return dictionary
+
 
 def add_jeopardy_clues(jdict, index, category, clues, info=True):
     for i,clue in enumerate(clues):
@@ -325,18 +343,9 @@ class GameCog(commands.Cog):
         question = clue.question_to_str()
 
         question = await ctx.send(question)
-        correct_answers = get_possible_answers(clue.answer)
+        clue.update_possible_answers()
         # correctanswer = tag_re.sub('', clue.answer).lower()
         # correctanswer = between_parentheses_re.sub('', correctanswer)
-        number_clue = [True for x in correct_answers]
-        for i, answer in enumerate(correct_answers):
-            try:
-                n = int(answer)
-            except ValueError:
-                number_clue[i] = False
-            else:
-                correct_answers[i] = n
-
         # correctanswer = non_letters_re.sub('', correctanswer)
 
         button_leader_id = None
@@ -399,7 +408,7 @@ class GameCog(commands.Cog):
                 break
 
             answertext = answer_start_re.sub('', answertext, 1)
-            result = is_correct_answer(correct_answers, answertext, number_clue)
+            result = clue.is_correct_answer(answertext)
             if result:
                 question = await ctx.send("That's correct, {}. The correct response was **{}**.".format(
                                  answer.author.display_name, clue.answer))
@@ -442,11 +451,11 @@ class GameCog(commands.Cog):
                     reaction.emoji == '🔄')
         await question.add_reaction("🔄")
         try:
-            reaction, user = await self.bot.wait_for('reaction_add', timeout=20.0, check=reactioncheck)
+            _, user = await self.bot.wait_for('reaction_add', timeout=20.0, check=reactioncheck)
         except asyncio.TimeoutError:
             await question.remove_reaction("🔄", self.bot.user)
         else:
-            await question.remove_reaction("🔄", self.bot.user)
+            # await question.remove_reaction("🔄", self.bot.user)
             ctx.message.author = user
             ctx.message.content = "repeat clue"
             await self.clue.invoke(ctx)
@@ -483,15 +492,7 @@ class GameCog(commands.Cog):
         question = clue.question_to_str()
 
         await ctx.send(question)
-        correct_answers = get_possible_answers(clue.answer)
-        number_clue = [True for x in correct_answers]
-        for i, answer in enumerate(correct_answers):
-            try:
-                n = int(answer)
-            except ValueError:
-                number_clue[i] = False
-            else:
-                correct_answers[i] = n
+        clue.update_possible_answers()
         def is_valid_answer(message):
             return (message.channel == ctx.channel and
                     message.content.lower().startswith(answer_starts) and
@@ -511,7 +512,7 @@ class GameCog(commands.Cog):
                                     f"**{clue.answer}**.")
             else:
                 answertext = answer_start_re.sub('', answer.content.lower(), 1)
-                result = is_correct_answer(correct_answers, answertext, number_clue)
+                result = clue.is_correct_answer(answertext)
                 if result:
                     question = await ctx.send("That's correct, {}. The correct response was **{}**.".format(
                                      answer.author.display_name, clue.answer))
@@ -770,12 +771,11 @@ class GameCog(commands.Cog):
         jdict['modifying'] = True
         if clue_id is None:
             while True:
-                clue, category = await self.get_random_clue(get_category=True)
+                clue = await self.get_random_clue()
                 if not clue_in_jeopardy(jdict, clue.id):
                     break
             clue.answered = False
             jdict['final'] = clue
-            jdict['final_category'] = category
             await ctx.send(f"Added `{jdict['final'].id}` to **Final Jeopardy!**\n")
             jdict['modifying'] = False
             return
@@ -801,10 +801,8 @@ class GameCog(commands.Cog):
                 else:
                     category['title'] = category['title'].upper()
                     clue.category_title = category['title']
-                    category = Category(**fix_id(category))
                     clue.answered = False
                     jdict['final'] = clue
-                    jdict['final_category'] = category
                     await ctx.send(f"Added `{jdict['final'].id}` to **Final Jeopardy!**\n")
         jdict['modifying'] = False
 
@@ -1051,17 +1049,8 @@ class GameCog(commands.Cog):
             await player['info'].send(bet_message)
 
         clue = jdict['final']
-        category = jdict['final_category']
 
-        correct_answers = get_possible_answers(clue.answer)
-        number_clue = [True for x in correct_answers]
-        for i, answer in enumerate(correct_answers):
-            try:
-                n = int(answer)
-            except ValueError:
-                number_clue[i] = False
-            else:
-                correct_answers[i] = n
+        clue.update_possible_answers()
         def is_valid_answer(message):
             return (message.author.id in players and
                     type(message.channel) == discord.DMChannel and
@@ -1100,7 +1089,7 @@ class GameCog(commands.Cog):
             if answer:
                 result += f"guessed {answer}... "
                 await ctx.send(result)
-                if is_correct_answer(correct_answers, answer, number_clue):
+                if clue.is_correct_answer(answer):
                     await ctx.send("That is correct.")
                     await ctx.send(f"You also bet ${players[player]['bet']}.")
                     await award_points(ctx, jdict['players'], player, players[player]['bet'])
