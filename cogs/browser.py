@@ -5,7 +5,7 @@ import asyncio
 import aiohttp
 import random
 import logging
-from .utilities import *
+from cogs.utilities import jservice_get_json, is_valid_clue
 
 class BrowserCog(commands.Cog):
     def __init__(self, bot):
