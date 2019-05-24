@@ -107,22 +107,44 @@ class Clue:
             return False
 
 
+def list_of_length(n):
+    def f():
+        return [None] * n
+    return f
+
+
+@dataclasses.dataclass
+class JeopardyGame:
+    categories: list = dataclasses.field(default_factory=list_of_length(12))
+    clues : list = dataclasses.field(default_factory=list_of_length(12))
+    final : Clue = None
+    daily_doubles : list = dataclasses.field(default_factory=list_of_length(3))
+    active : bool = False
+    modifying : bool = False
+    players : list = dataclasses.field(default_factory=list)
+    leader_id : int = None
+    answered : int = 0
+    game_round : int = 0
+    time_limit : float = 60.0*60.0
+    start_time : datetime = None
+
+
 def fix_id(dictionary):
     dictionary['id_'] = dictionary['id']
     del dictionary['id']
     return dictionary
 
 
-def add_jeopardy_clues(jdict, index, category, clues, info=True):
+def add_jeopardy_clues(game, index, category, clues, info=True):
     for i,clue in enumerate(clues):
         clue.value = 100*(i+1)*(2 if index > 5 else 1)
         clue.answered = False
-    jdict['categories'][index] = category
-    jdict['clues'][index] = clues
+    game.categories[index] = category
+    game.clues[index] = clues
     if not info:
         return ""
     result = "Added "
-    for (i, clue) in enumerate(jdict['clues'][index]):
+    for (i, clue) in enumerate(game.clues[index]):
         if i != 4:
             result += f"`{clue.id_}`, "
         elif index < 6:
@@ -131,22 +153,26 @@ def add_jeopardy_clues(jdict, index, category, clues, info=True):
             result += f"and `{clue.id_}` (`{category.id_}`) to **Double Jeopardy!**\n"
     return result
 
-def clue_in_jeopardy(jdict, clue_id):
-    for category in jdict['clues']:
+def clue_in_jeopardy(game, clue_id):
+    for category in game.clues:
         if category is None:
             continue
         for clue in category:
             if clue.id_ == clue_id:
                 return True
-    return jdict['final'] and jdict['final'].id_ == clue_id
+    return game.final and game.final.id_ == clue_id
 
 def same_id(a, b):
     return a and b and a.id_ == b.id_
 
 def id_to_index(items, item_id):
     for i, item in enumerate(items):
-        if item and item.id_ == item_id:
-            return i
+        if isinstance(item, dict):
+            if item and item['id'] == item_id:
+                return i
+        else:
+            if item and item.id_ == item_id:
+                return i
     return None
 
 def score_to_text(score):
@@ -155,13 +181,13 @@ def score_to_text(score):
     else:
         return f'${score}'
 
-def get_clue_index(jdict, clue):
-    category_index = id_to_index(jdict['categories'], clue.category_id)
-    clue_index = id_to_index(jdict['clues'][category_index], clue.id_)
+def get_clue_index(game, clue):
+    category_index = id_to_index(game.categories, clue.category_id)
+    clue_index = id_to_index(game.clues[category_index], clue.id_)
     return category_index, clue_index
 
-def get_next_clue(jdict, category_index, clue_index):
-    if jdict['round'] >= 3:
+def get_next_clue(game, category_index, clue_index):
+    if game.game_round >= 3:
         return None
     i = 0
     while i < 30:
@@ -171,20 +197,20 @@ def get_next_clue(jdict, category_index, clue_index):
             clue_index = 0
             category_index += 1
             category_index %= 6
-            if jdict['round'] == 2:
+            if game.game_round == 2:
                 category_index += 6
-        if not jdict['clues'][category_index][clue_index].answered:
-            return jdict['clues'][category_index][clue_index]
+        if not game.clues[category_index][clue_index].answered:
+            return game.clues[category_index][clue_index]
     return None
 
-def get_board(jdict):
+def get_board(game):
     result = ""
-    for i, category in enumerate(jdict['clues']):
-        if jdict['round'] == 1 and i >= 6:
+    for i, category in enumerate(game.clues):
+        if game.game_round == 1 and i >= 6:
             break
-        elif jdict['round'] == 2 and i < 6:
+        elif game.game_round == 2 and i < 6:
             continue
-        result += f"**{jdict['categories'][i].title}** `{jdict['categories'][i].id_}`: "
+        result += f"**{game.categories[i].title}** `{game.categories[i].id_}`: "
         for j, clue in enumerate(category):
             if j == 4:
                 result += ", and "
@@ -193,8 +219,8 @@ def get_board(jdict):
             result += "{0}${1}{0}".format(('~~' if clue.answered else '**'), clue.value)
             if j == 4:
                 result += ".\n"
-    leader = id_to_index(jdict['players'], jdict['leader'])
-    leader = jdict['players'][leader]['name']
+    leader = id_to_index(game.players, game.leader_id)
+    leader = game.players[leader]['name']
     result += f"The current leader is {leader}.\n"
     return result
 
@@ -203,18 +229,18 @@ async def award_points(ctx, players, player_id, points):
     players[index]['score'] += points
     await ctx.send(f"That gets you{' down' if points < 0 else ''} to {score_to_text(players[index]['score'])}.")
 
-async def mark_as_answered(ctx, jdict, clue):
+async def mark_as_answered(ctx, game, clue):
     clue.answered = True
-    jdict['answered'] += 1
-    if jdict['round'] == 3:
-        jdict['round'] += 1
-    if jdict['answered'] == 30:
-        if jdict['round'] == 1:
+    game.answered += 1
+    if game.game_round == 3:
+        game.game_round += 1
+    if game.answered == 30:
+        if game.game_round == 1:
             await ctx.send("And that takes us to the **Double Jeopardy!** round.")
-        elif jdict['round'] == 2:
+        elif game.game_round == 2:
             await ctx.send("And that takes us to the **Final Jeopardy!** round. Use the `jeopardy final` command to start it.")
-        jdict['round'] += 1
-        jdict['answered'] = 0
+        game.game_round += 1
+        game.answered = 0
 
 class GameCog(commands.Cog):
 
@@ -238,18 +264,7 @@ class GameCog(commands.Cog):
                 'clean mode' : False,
                 'active' : False,
                 'id' : channel,
-                'jeopardy' : {'categories' : [None]*12,
-                              'clues' : [None]*12,
-                              'final' : None,
-                              'daily doubles' : [None, None, None],
-                              'active' : False,
-                              'modifying' : False,
-                              'players' : [],
-                              'leader' : None,
-                              'answered' : 0,
-                              'round' : 0,
-                              'time limit' : 60.0*60.0,
-                              'start time' : None}
+                'jeopardy' : JeopardyGame()
             }
         return self.channels[channel]
 
@@ -286,23 +301,23 @@ class GameCog(commands.Cog):
                 return clue, category
             return clue
 
-    async def end_jeopardy_clue(self, ctx, jdict, question, clue):
-        await mark_as_answered(ctx, jdict, clue)
-        if jdict['round'] == 1:
-            if (jdict['time limit']/2 - (datetime.utcnow() - jdict['start time']).total_seconds() < 0):
+    async def end_jeopardy_clue(self, ctx, game, question, clue):
+        await mark_as_answered(ctx, game, clue)
+        if game.game_round == 1:
+            if (game.time_limit/2 - (datetime.utcnow() - game.start_time).total_seconds() < 0):
                 await ctx.send("We're out of time for **Jeopardy!** Moving on to **Double Jeopardy!**")
-                jdict['round'] = 2
-                jdict['answered'] = 0
-        elif jdict['round'] == 2:
-            if (jdict['time limit'] - (datetime.utcnow() - jdict['start time']).total_seconds() < 0):
+                game.game_round = 2
+                game.answered = 0
+        elif game.game_round == 2:
+            if (game.time_limit - (datetime.utcnow() - game.start_time).total_seconds() < 0):
                 await ctx.send("We're out of time for **Double Jeopardy!** Moving on to **Final Jeopardy!**")
-                jdict['round'] = 3
-                jdict['answered'] = 0
-        if jdict['round'] == 3:
+                game.game_round = 3
+                game.answered = 0
+        if game.game_round == 3:
             return
         def reaction_check(reaction, user):
             return (reaction.message.id == question.id and
-                    user.id == jdict['leader'] and
+                    user.id == game.leader_id and
                     reaction.emoji in ['⬇', '⏭', '📋'])
         for bot_reaction in ['⬇', '⏭', '📋']:
             await question.add_reaction(bot_reaction)
@@ -315,20 +330,20 @@ class GameCog(commands.Cog):
         for bot_reaction in ['⬇', '⏭', '📋']:
             await question.remove_reaction(bot_reaction, self.bot.user)
         if reaction.emoji == '📋':
-            await ctx.send(get_board(jdict))
+            await ctx.send(get_board(game))
             return
-        category_index, clue_index = get_clue_index(jdict, clue)
+        category_index, clue_index = get_clue_index(game, clue)
         next_clue = None
         if reaction.emoji == '⬇':
-            next_clue = get_next_clue(jdict, category_index, clue_index)
+            next_clue = get_next_clue(game, category_index, clue_index)
         elif reaction.emoji == '⏭':
-            next_clue = get_next_clue(jdict, category_index, 4)
+            next_clue = get_next_clue(game, category_index, 4)
         if next_clue is None:
             await ctx.send("Something went wrong...")
             return
         clue = next_clue
-        category_index, clue_index = get_clue_index(jdict, clue)
-        if clue.id_ in jdict['daily doubles']:
+        category_index, clue_index = get_clue_index(game, clue)
+        if clue.id_ in game.daily_doubles:
             await self.daily_double(ctx, clue)
         else:
             await self.play(ctx, clue, jeopardy_mode=True)
@@ -361,7 +376,7 @@ class GameCog(commands.Cog):
         question_start = datetime.utcnow()
         while True:
             if jeopardy_mode and not be_specific:
-                button_leader_id, button_leader_name = await self.button_check(question, incorrect_answer_ids, channel['jeopardy']['players'])
+                button_leader_id, button_leader_name = await self.button_check(question, incorrect_answer_ids, channel['jeopardy'].players)
                 if button_leader_id is not None:
                     question = await ctx.send(f"{button_leader_name}, what's your answer?")
                 else:
@@ -388,16 +403,16 @@ class GameCog(commands.Cog):
                 be_specific = False
                 if jeopardy_mode:
                     incorrect_answer_ids.append(button_leader_id)
-                if channel['button mode'] or (jeopardy_mode and len(incorrect_answer_ids) < len(channel['jeopardy']['players'])):
+                if channel['button mode'] or (jeopardy_mode and len(incorrect_answer_ids) < len(channel['jeopardy'].players)):
                     question = await ctx.send("Time's up, somebody else?")
                     if jeopardy_mode:
-                        await award_points(ctx, channel['jeopardy']['players'], button_leader_id, -clue.value)
+                        await award_points(ctx, channel['jeopardy'].players, button_leader_id, -clue.value)
                     continue
                 else:
                     question = await ctx.send("Time's up! The correct response was "
                                               f"**{clue.answer}**.")
                     if jeopardy_mode:
-                        await award_points(ctx, channel['jeopardy']['players'], button_leader_id, -clue.value)
+                        await award_points(ctx, channel['jeopardy'].players, button_leader_id, -clue.value)
                     break
 
 
@@ -413,8 +428,8 @@ class GameCog(commands.Cog):
                 question = await ctx.send("That's correct, {}. The correct response was **{}**.".format(
                                  answer.author.display_name, clue.answer))
                 if jeopardy_mode:
-                    await award_points(ctx, channel['jeopardy']['players'], button_leader_id, clue.value)
-                    channel['jeopardy']['leader'] = button_leader_id
+                    await award_points(ctx, channel['jeopardy'].players, button_leader_id, clue.value)
+                    channel['jeopardy'].leader_id = button_leader_id
                 break
             else:
                 if result is None and not be_specific:
@@ -426,14 +441,14 @@ class GameCog(commands.Cog):
                     if jeopardy_mode:
                         be_specific = False
                         incorrect_answer_ids.append(button_leader_id)
-                        if len(incorrect_answer_ids) == len(channel['jeopardy']['players']):
+                        if len(incorrect_answer_ids) == len(channel['jeopardy'].players):
                             question = await ctx.send(f"That's incorrect, {answer.author.display_name}. The correct response was **{clue.answer}**.")
-                            await award_points(ctx, channel['jeopardy']['players'], button_leader_id, -clue.value)
+                            await award_points(ctx, channel['jeopardy'].players, button_leader_id, -clue.value)
                             break
                     question = await ctx.send(f"That's incorrect, {answer.author.display_name}.",
                                               delete_after=(2.0 if channel['clean mode'] else None))
                     if jeopardy_mode:
-                        await award_points(ctx, channel['jeopardy']['players'], button_leader_id, -clue.value)
+                        await award_points(ctx, channel['jeopardy'].players, button_leader_id, -clue.value)
                 if channel['clean mode']:
                     try:
                         await answer.delete()
@@ -466,9 +481,9 @@ class GameCog(commands.Cog):
             await ctx.send("There's already an active question in this channel.")
             return
         channel['active'] = True
-        leader = id_to_index(channel['jeopardy']['players'], channel['jeopardy']['leader'])
-        leader = channel['jeopardy']['players'][leader]
-        max_bet = max(leader['score'], (500 if channel['jeopardy']['round'] == 1 else 1000))
+        leader = id_to_index(channel['jeopardy'].players, channel['jeopardy'].leader_id)
+        leader = channel['jeopardy'].players[leader]
+        max_bet = max(leader['score'], (500 if channel['jeopardy'].game_round == 1 else 1000))
         def is_valid_bet(message):
             return (message.channel == ctx.channel and
                     leader['id'] == message.author.id and
@@ -507,7 +522,7 @@ class GameCog(commands.Cog):
                                                  timeout=(15.0 if be_specific else 30.0),
                                                  check=is_valid_answer)
             except asyncio.TimeoutError:
-                await award_points(ctx, channel['jeopardy']['players'], leader['id'], -bet)
+                await award_points(ctx, channel['jeopardy'].players, leader['id'], -bet)
                 question = await ctx.send("Time's up! The correct response was "
                                     f"**{clue.answer}**.")
             else:
@@ -516,14 +531,14 @@ class GameCog(commands.Cog):
                 if result:
                     question = await ctx.send("That's correct, {}. The correct response was **{}**.".format(
                                      answer.author.display_name, clue.answer))
-                    await award_points(ctx, channel['jeopardy']['players'], leader['id'], bet)
+                    await award_points(ctx, channel['jeopardy'].players, leader['id'], bet)
                 elif result is None and not be_specific:
                     await ctx.send(f"Be more specific, {answer.author.display_name}.")
                     be_specific = True
                     continue
                 else:
                     question = await ctx.send(f"That's incorrect, {answer.author.display_name}. The correct response was **{clue.answer}**.")
-                    await award_points(ctx, channel['jeopardy']['players'], leader['id'], -bet)
+                    await award_points(ctx, channel['jeopardy'].players, leader['id'], -bet)
                 break
         channel['active'] = False
         await self.end_jeopardy_clue(ctx, channel['jeopardy'], question, clue)
@@ -644,28 +659,28 @@ class GameCog(commands.Cog):
         pass
 
     async def is_active_jeopardy(self, ctx, warning=True):
-        if self.get_channel(ctx.channel.id)['jeopardy']['active']:
+        if self.get_channel(ctx.channel.id)['jeopardy'].active:
             if warning:
                 await ctx.send("There's already an active game. Wait until the current game is done!")
             return True
         return False
 
     async def is_modifying_jeopardy(self, ctx, warning=True):
-        if self.get_channel(ctx.channel.id)['jeopardy']['modifying']:
+        if self.get_channel(ctx.channel.id)['jeopardy'].modifying:
             if warning:
                 await ctx.send("The game is currently being modified. Wait until the current step is done!")
             return True
         return False
 
-    async def get_random_category(self, jdict):
-        while True:
+    async def get_random_category(self, game):
+        for _ in range(100):
             category_id = random.randint(1, CATEGORY_AMOUNT)
-            if id_to_index(jdict['categories'], category_id) is None:
+            if id_to_index(game.categories, category_id) is not None:
                 continue
             category = await jservice_get_json(self.session, 'api/category', {'id':category_id})
             if not category:
                 continue
-            valid_clues = [x for x in category['clues'] if is_valid_clue(x) and jdict['final'].id_ != x.id]
+            valid_clues = [x for x in category['clues'] if is_valid_clue(x) and (not game.final or game.final.id_ != x['id'])]
             for i in range(len(valid_clues)-1, 0, -1):
                 question = valid_clues[i]['question'].lower()
                 for j in range(0, i):
@@ -674,6 +689,8 @@ class GameCog(commands.Cog):
                         break
             if len(valid_clues) >= 5:
                 break
+        else:
+            return None, None
         clues = [None]*5
         category['title'] = category['title'].upper()
         for i in range(5):
@@ -688,54 +705,54 @@ class GameCog(commands.Cog):
     async def autoadd(self, ctx):
         if await self.is_active_jeopardy(ctx) or await self.is_modifying_jeopardy(ctx):
             return
-        jdict = self.get_channel(ctx.channel.id)['jeopardy']
-        jdict['modifying'] = True
+        game = self.get_channel(ctx.channel.id)['jeopardy']
+        game.modifying = True
         try:
-            category_index = jdict['categories'].index(None)
+            category_index = game.categories.index(None)
         except ValueError:
             await ctx.send("There are already 12 categories! You need to remove one before you add one.")
         else:
-            category, clues = await self.get_random_category(jdict)
-            result = add_jeopardy_clues(jdict, category_index, category, clues)
+            category, clues = await self.get_random_category(game)
+            result = add_jeopardy_clues(game, category_index, category, clues)
             await ctx.send(result)
-        jdict['modifying'] = False
+        game.modifying = False
 
     @jeopardy.command()
     async def autofill(self, ctx):
         if await self.is_active_jeopardy(ctx) or await self.is_modifying_jeopardy(ctx):
             return
-        jdict = self.get_channel(ctx.channel.id)['jeopardy']
-        jdict['modifying'] = True
-        while None in jdict['categories']:
-            category_index = jdict['categories'].index(None)
-            category, clues = await self.get_random_category(jdict)
-            result = add_jeopardy_clues(jdict, category_index, category, clues)
+        game = self.get_channel(ctx.channel.id)['jeopardy']
+        game.modifying = True
+        while None in game.categories:
+            category_index = game.categories.index(None)
+            category, clues = await self.get_random_category(game)
+            result = add_jeopardy_clues(game, category_index, category, clues)
             await ctx.send(result)
         await ctx.send("There are no more categories to add.")
-        jdict['modifying'] = False
+        game.modifying = False
 
     @jeopardy.command()
     async def add(self, ctx, clue1:int, clue2:int, clue3:int, clue4:int, clue5:int):
         if await self.is_active_jeopardy(ctx) or await self.is_modifying_jeopardy(ctx):
             return
-        jdict = self.get_channel(ctx.channel.id)['jeopardy']
-        jdict['modifying'] = True
+        game = self.get_channel(ctx.channel.id)['jeopardy']
+        game.modifying = True
         category_id = None
         try:
-            category_index = jdict['categories'].index(None)
+            category_index = game.categories.index(None)
         except ValueError:
             await ctx.send("There are already 12 categories! You need to remove one before you add one.")
-            jdict['modifying'] = False
+            game.modifying = False
             return
         clue_ids = [clue1, clue2, clue3, clue4, clue5]
         for clue_id in clue_ids:
             if clue_ids.count(clue_id) > 1:
                 await ctx.send("You can't add the same clue more than once!")
-            elif clue_in_jeopardy(jdict, clue_id):
+            elif clue_in_jeopardy(game, clue_id):
                 await ctx.send(f"{clue_id} has already been added.")
             else:
                 continue
-            jdict['modifying'] = False
+            game.modifying = False
             return
         clues = [None]*5
         for i, clue_id in enumerate(clue_ids):
@@ -745,7 +762,7 @@ class GameCog(commands.Cog):
                 break
             if i == 0:
                 category_id = clue.category_id
-                if id_to_index(jdict['categories'], category_id) is not None:
+                if id_to_index(game.categories, category_id) is not None:
                     await ctx.send('That category has already been added.')
                     break
                 category = await jservice_get_json(self.session, f'categories/{category_id}.json')
@@ -754,38 +771,38 @@ class GameCog(commands.Cog):
             elif category_id != clue.category_id:
                 await ctx.send(f"All clues should share the same category, clue number {i+1} (`{clue_id}`) doesn't have the same category as the previous clues.")
                 break
-            elif same_id(jdict['final'], clue):
+            elif same_id(game.final, clue):
                 await ctx.send(f'`{clue_id}` is already the **Final Jeopardy!** clue.')
             clues[i] = Clue(**fix_id(clue))
             clues[i].category_title = category.title
         else:
-            result = add_jeopardy_clues(jdict, category_index, category, clues)
+            result = add_jeopardy_clues(game, category_index, category, clues)
             await ctx.send(result)
-        jdict['modifying'] = False
+        game.modifying = False
 
     @jeopardy.command()
     async def add_final(self, ctx, clue_id=None):
         if await self.is_active_jeopardy(ctx) or await self.is_modifying_jeopardy(ctx):
             return
-        jdict = self.get_channel(ctx.channel.id)['jeopardy']
-        jdict['modifying'] = True
+        game = self.get_channel(ctx.channel.id)['jeopardy']
+        game.modifying = True
         if clue_id is None:
             while True:
                 clue = await self.get_random_clue()
-                if not clue_in_jeopardy(jdict, clue.id):
+                if not clue_in_jeopardy(game, clue.id_):
                     break
             clue.answered = False
-            jdict['final'] = clue
-            await ctx.send(f"Added `{jdict['final'].id}` to **Final Jeopardy!**\n")
-            jdict['modifying'] = False
+            game.final = clue
+            await ctx.send(f"Added `{game.final.id_}` to **Final Jeopardy!**\n")
+            game.modifying = False
             return
         try:
             clue_id = int(clue_id)
         except ValueError:
             await ctx.send("The id, if you're using it, needs to be a number.")
-            jdict['modifying'] = False
+            game.modifying = False
             return
-        if clue_in_jeopardy(jdict, clue_id):
+        if clue_in_jeopardy(game, clue_id):
             await ctx.send("That clue has already been added to this game!")
         else:
             clue = await jservice_get_json(self.session, f'clues/{clue_id}.json')
@@ -802,49 +819,49 @@ class GameCog(commands.Cog):
                     category['title'] = category['title'].upper()
                     clue.category_title = category['title']
                     clue.answered = False
-                    jdict['final'] = clue
-                    await ctx.send(f"Added `{jdict['final'].id}` to **Final Jeopardy!**\n")
-        jdict['modifying'] = False
+                    game.final = clue
+                    await ctx.send(f"Added `{game.final.id_}` to **Final Jeopardy!**\n")
+        game.modifying = False
 
     @jeopardy.command(name='categories')
     async def categories_info(self, ctx):
-        jdict = self.get_channel(ctx.channel.id)['jeopardy']
-        categories = jdict['categories']
+        game = self.get_channel(ctx.channel.id)['jeopardy']
+        categories = game.categories
         result = "The **Jeopardy!** categories are: "
         for i in range(6):
             if i != 5:
-                result += f"`{categories[i] and categories[i].id}`, "
+                result += f"`{categories[i] and categories[i].id_}`, "
             else:
-                result += f"and `{categories[i] and categories[i].id}`.\n"
+                result += f"and `{categories[i] and categories[i].id_}`.\n"
         result += "The **Double Jeopardy!** categories are: "
         for i in range(6,12):
             if i != 11:
-                result += f"`{categories[i] and categories[i].id}`, "
+                result += f"`{categories[i] and categories[i].id_}`, "
             else:
-                result += f"and `{categories[i] and categories[i].id}`.\n"
-        result += f"The clue for **Final Jeopardy!** is: `{jdict['final'] and jdict['final'].id}`.\n"
+                result += f"and `{categories[i] and categories[i].id_}`.\n"
+        result += f"The clue for **Final Jeopardy!** is: `{game.final and game.final.id_}`.\n"
         await ctx.send(result)
 
     @jeopardy.command()
     async def remove(self, ctx, category_id:int):
         if await self.is_active_jeopardy(ctx) or await self.is_modifying_jeopardy(ctx):
             return
-        jdict = self.get_channel(ctx.channel.id)['jeopardy']
-        jdict['modifying'] = True
-        category_index = id_to_index(jdict['categories'], category_id)
+        game = self.get_channel(ctx.channel.id)['jeopardy']
+        game.modifying = True
+        category_index = id_to_index(game.categories, category_id)
         if category_index is None:
             await ctx.send(f"Category `{category_id}` is not one of the categories.")
         else:
-            jdict['categories'][category_index] = None
-            jdict['clues'][category_index] = None
+            game.categories[category_index] = None
+            game.clues[category_index] = None
             await ctx.send(f"Category `{category_id}` has been removed.")
-        jdict['modifying'] = False
+        game.modifying = False
 
     @jeopardy.command()
     async def join(self, ctx):
         if await self.is_active_jeopardy(ctx):
             return
-        players = self.get_channel(ctx.channel.id)['jeopardy']['players']
+        players = self.get_channel(ctx.channel.id)['jeopardy'].players
         player_index = id_to_index(players, ctx.author.id)
         if player_index is not None:
             await ctx.send(f"{ctx.author.display_name} is already a player!")
@@ -856,7 +873,7 @@ class GameCog(commands.Cog):
     async def leave(self, ctx):
         if await self.is_active_jeopardy(ctx):
             return
-        players = self.get_channel(ctx.channel.id)['jeopardy']['players']
+        players = self.get_channel(ctx.channel.id)['jeopardy'].players
         player_index = id_to_index(players, ctx.author.id)
         if player_index is None:
             await ctx.send(f"{ctx.author.display_name} is not a player!")
@@ -866,7 +883,7 @@ class GameCog(commands.Cog):
 
     @jeopardy.command()
     async def players(self, ctx):
-        players = self.get_channel(ctx.channel.id)['jeopardy']['players']
+        players = self.get_channel(ctx.channel.id)['jeopardy'].players
         if not players:
             result = 'There are currently no players.'
         elif len(players) == 1:
@@ -884,66 +901,65 @@ class GameCog(commands.Cog):
     async def start(self, ctx):
         if await self.is_active_jeopardy(ctx) or await self.is_modifying_jeopardy(ctx):
             return
-        jdict = self.get_channel(ctx.channel.id)['jeopardy']
-        jdict['active'] = True
-        if len(jdict['players']) < 2:
+        game = self.get_channel(ctx.channel.id)['jeopardy']
+        game.active = True
+        if len(game.players) < 2:
             await ctx.send('You need at least two players to play Jeopardy!')
-        elif None in jdict['categories'] or not jdict['final']:
+        elif None in game.categories or not game.final:
             await ctx.send("You don't have all clues ready!")
         else:
-            leader = jdict['players'][0]
-            jdict['leader'] = leader['id']
+            leader = game.players[0]
+            game.leader_id = leader['id']
             n = random.randint(0,29)
-            jdict['daily doubles'][0] = jdict['clues'][n//6][n%5].id
+            game.daily_doubles[0] = game.clues[n//6][n%5].id_
             n = random.randint(30,59)
-            jdict['daily doubles'][1] = jdict['clues'][n//6][n%5].id
+            game.daily_doubles[1] = game.clues[n//6][n%5].id_
             newn = random.randint(30,59)
             while newn == n:
                 newn = random.randint(30,59)
             n = newn
-            jdict['daily doubles'][2] = jdict['clues'][n//6][n%5].id
-            jdict['start time'] = datetime.utcnow()
-            jdict['round'] = 1
-            jdict['answered'] = 0
+            game.daily_doubles[2] = game.clues[n//6][n%5].id_
+            game.start_time = datetime.utcnow()
+            game.game_round = 1
+            game.answered = 0
             await ctx.send(f"The game has started.") # , {leader['name']} chooses first.")
-            await ctx.send(get_board(jdict))
+            await ctx.send(get_board(game))
             return
 
-        jdict['active'] = False
+        game.active = False
 
     @jeopardy.command()
     async def stop(self, ctx):
         if not await self.is_active_jeopardy(ctx, False):
             await ctx.send("There's no game currently active.")
             return
-        jdict = self.get_channel(ctx.channel.id)['jeopardy']
-        for category in jdict['clues']:
+        game = self.get_channel(ctx.channel.id)['jeopardy']
+        for category in game.clues:
             for clue in category:
                 clue.answered = False
-        jdict['final'].answered = False
-        for player in jdict['players']:
+        game.final.answered = False
+        for player in game.players:
             player['score'] = 0
-        jdict['active'] = False
+        game.active = False
         await ctx.send("The game has been cancelled.")
 
     @jeopardy.command()
     async def clear(self, ctx):
         if await self.is_active_jeopardy(ctx) or await self.is_modifying_jeopardy(ctx):
             return
-        self.get_channel(ctx.channel.id)['jeopardy'] = {
-            'categories' : [None]*12,
-            'clues' : [None]*12,
-            'final' : None,
-            'daily doubles' : [None, None, None],
-            'active' : False,
-            'modifying' : False,
-            'players' : [],
-            'leader' : None,
-            'answered' : 0,
-            'round' : 0,
-            'time limit' : 60.0*60.0,
-            'start time' : None
-            }
+        game = self.get_channel(ctx.channel.id)['jeopardy']
+        game.categories = [None]*12
+        game.clues = [None]*12
+        game.final = None
+        game.daily_doubles = [None, None, None]
+        game.active = False
+        game.modifying = False
+        game.players = []
+        game.leader = None
+        game.answered = 0
+        game.round = 0
+        game.time_limit = 60.0*60.0
+        game.start_time = None
         await ctx.send("The game has been cleared.")
 
 
@@ -952,14 +968,14 @@ class GameCog(commands.Cog):
     async def set_round(self, ctx, new_round:int):
         if not await self.is_active_jeopardy(ctx, False):
             return await ctx.send("There's no game currently active.")
-        self.get_channel(ctx.channel.id)['jeopardy']['round'] = new_round
+        self.get_channel(ctx.channel.id)['jeopardy'].game_round = new_round
 
     @commands.is_owner()
     @jeopardy.command(hidden=True)
     async def get_round(self, ctx):
         if not await self.is_active_jeopardy(ctx, False):
             return await ctx.send("There's no game currently active.")
-        await ctx.send(self.get_channel(ctx.channel.id)['jeopardy']['round'])
+        await ctx.send(self.get_channel(ctx.channel.id)['jeopardy'].game_round)
 
 
     @commands.is_owner()
@@ -967,14 +983,14 @@ class GameCog(commands.Cog):
     async def set_answered(self, ctx, new_answered:int):
         if not await self.is_active_jeopardy(ctx, False):
             return await ctx.send("There's no game currently active.")
-        self.get_channel(ctx.channel.id)['jeopardy']['answered'] = new_answered
+        self.get_channel(ctx.channel.id)['jeopardy'].answered = new_answered
 
     @commands.is_owner()
     @jeopardy.command(hidden=True)
     async def get_answered(self, ctx):
         if not await self.is_active_jeopardy(ctx, False):
             return await ctx.send("There's no game currently active.")
-        await ctx.send(self.get_channel(ctx.channel.id)['jeopardy']['answered'])
+        await ctx.send(self.get_channel(ctx.channel.id)['jeopardy'].answered)
 
     @jeopardy.command()
     async def display(self, ctx):
@@ -992,13 +1008,13 @@ class GameCog(commands.Cog):
         if channel['active']:
             await ctx.send("There's already an active question in this channel.")
             return
-        jdict = channel['jeopardy']
-        if jdict['round'] != 3:
+        game = channel['jeopardy']
+        if game.game_round != 3:
             await ctx.send("You're not in the Final Jeopardy! round.")
             return
         channel['active'] = True
         players = {}
-        for player in jdict['players']:
+        for player in game.players:
             if player['score'] <= 0:
                 continue
             info = await self.bot.get_user(player['id'])
@@ -1048,7 +1064,7 @@ class GameCog(commands.Cog):
         for player in players.values():
             await player['info'].send(bet_message)
 
-        clue = jdict['final']
+        clue = game.final
 
         clue.update_possible_answers()
         def is_valid_answer(message):
@@ -1092,30 +1108,30 @@ class GameCog(commands.Cog):
                 if clue.is_correct_answer(answer):
                     await ctx.send("That is correct.")
                     await ctx.send(f"You also bet ${players[player]['bet']}.")
-                    await award_points(ctx, jdict['players'], player, players[player]['bet'])
+                    await award_points(ctx, game.players, player, players[player]['bet'])
                 else:
                     await ctx.send("That is incorrect.")
                     await ctx.send(f"You also bet ${players[player]['bet']}.")
-                    await award_points(ctx, jdict['players'], player, -players[player]['bet'])
+                    await award_points(ctx, game.players, player, -players[player]['bet'])
             else:
                 result += f"did not make a guess."
                 await ctx.send(result)
                 await ctx.send(f"You also bet ${players[player]['bet']}.")
-                await award_points(ctx, jdict['players'], player, -players[player]['bet'])
+                await award_points(ctx, game.players, player, -players[player]['bet'])
 
-        final_scores = sorted([(x['score'], x['name']) for x in jdict['players']])
+        final_scores = sorted([(x['score'], x['name']) for x in game.players])
 
         await ctx.send("From last to first place, the final scores are:")
         for score, name in final_scores:
             await ctx.send(f"{name} with {score_to_text(score)}.")
         channel['active'] = False
-        await mark_as_answered(ctx, jdict, clue)
+        await mark_as_answered(ctx, game, clue)
 
     @jeopardy.command()
     async def timelimit(self, ctx, minutes:int):
         if minutes <= 1:
             return
-        self.get_channel(ctx.channel.id)['jeopardy']['time limit'] = minutes * 60.0
+        self.get_channel(ctx.channel.id)['jeopardy'].time_limit = minutes * 60.0
         await ctx.send(f"Changed the time limit of the game to {minutes} minutes.")
 
 
@@ -1123,16 +1139,16 @@ class GameCog(commands.Cog):
     async def award(self, ctx, player:discord.Member, money:int):
         if ctx.author.id == player.id:
             await ctx.send("You can't award money to yourself.")
-        elif id_to_index(self.get_channel(ctx.channel.id)['jeopardy']['players'], player.id) is None:
+        elif id_to_index(self.get_channel(ctx.channel.id)['jeopardy'].players, player.id) is None:
             await ctx.send("That's not one of the players.")
         else:
-            await award_points(ctx, self.get_channel(ctx.channel.id)['jeopardy']['players'], player.id, money)
+            await award_points(ctx, self.get_channel(ctx.channel.id)['jeopardy'].players, player.id, money)
 
     @jeopardy.command()
     async def kick(self, ctx, player:discord.Member):
         if await self.is_active_jeopardy(ctx):
             return
-        players = self.get_channel(ctx.channel.id)['jeopardy']['players']
+        players = self.get_channel(ctx.channel.id)['jeopardy'].players
         player_index = id_to_index(players, player.id)
         if player_index is None:
             await ctx.send(f"{player.display_name} is not a player!")
@@ -1147,12 +1163,12 @@ class GameCog(commands.Cog):
         channel = self.get_channel(ctx.channel.id)
         if channel['active']:
             return
-        jdict = channel['jeopardy']
-        if not (0 <= jdict['answered'] < 60):
+        game = channel['jeopardy']
+        if not (0 <= game.answered < 60):
             return
-        if not jdict['active'] or (id_to_index(jdict['players'], ctx.author.id) is None):
+        if not game.active or (id_to_index(game.players, ctx.author.id) is None):
             return
-        if jdict['leader'] != ctx.author.id:
+        if game.leader_id != ctx.author.id:
             await ctx.send("Only the current leader can choose a clue.")
             return
         clue = clue.upper().split()
@@ -1172,22 +1188,22 @@ class GameCog(commands.Cog):
         try:
             category_id = int(category)
         except ValueError:
-            for i, c in enumerate(jdict['categories']):
+            for i, c in enumerate(game.categories):
                 if c.title == category:
                     category_index = i
                     break
             else:
                 category_index = None
         else:
-            category_index = id_to_index(jdict['categories'], category_id)
+            category_index = id_to_index(game.categories, category_id)
         if category_index is None:
             await ctx.send("That's not one of the categories.")
             return
-        if ((category_index < 6 and jdict['round'] != 1) or
-            (category_index >= 6 and jdict['round'] != 2)):
+        if ((category_index < 6 and game.game_round != 1) or
+            (category_index >= 6 and game.game_round != 2)):
             await ctx.send("That category is not in this round.")
             return
-        if jdict['round'] == 1:
+        if game.game_round == 1:
             try:
                 clue_index = [100,200,300,400,500].index(value)
             except ValueError:
@@ -1199,11 +1215,11 @@ class GameCog(commands.Cog):
             except ValueError:
                 await ctx.send("There's no clue with that value.")
                 return
-        clue = jdict['clues'][category_index][clue_index]
+        clue = game.clues[category_index][clue_index]
         if clue.answered:
             await ctx.send("That clue has already been answered.")
             return
-        if clue.id in jdict['daily doubles']:
+        if clue.id_ in game.daily_doubles:
             await self.daily_double(ctx, clue)
         else:
             await self.play(ctx, clue, jeopardy_mode=True)
