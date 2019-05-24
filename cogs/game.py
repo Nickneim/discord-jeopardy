@@ -756,7 +756,7 @@ class GameCog(commands.Cog):
             elif same_id(jdict['final'], clue):
                 await ctx.send(f'`{clue_id}` is already the **Final Jeopardy!** clue.')
             clues[i] = Clue(**fix_id(clue))
-            clues[i].category_title = category['title']
+            clues[i].category_title = category.title
         else:
             result = add_jeopardy_clues(jdict, category_index, category, clues)
             await ctx.send(result)
