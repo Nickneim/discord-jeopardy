@@ -44,6 +44,13 @@ class Clue:
     value: int = 0
     invalid_count: int = 0
     answered: bool = False
+    category_title: str = "NO CATEGORY"
+
+    def question_to_str(self):
+        return ('The category is **{0.category_title}** for ${0.value}: ' +
+                '`{0.category_id}:{0.id_}` ({1}/{2})\n```\n{0.question}```'
+               ).format(self, self.airdate[5:7], self.airdate[2:4])
+
 
 
 def fix_id(clue):
@@ -159,7 +166,7 @@ def get_board(jdict):
             break
         elif jdict['round'] == 2 and i < 6:
             continue
-        result += f"**{jdict['categories'][i].title.upper()}** `{jdict['categories'][i].id_}`: "
+        result += f"**{jdict['categories'][i].title}** `{jdict['categories'][i].id_}`: "
         for j, clue in enumerate(category):
             if j == 4:
                 result += ", and "
@@ -244,7 +251,7 @@ class GameCog(commands.Cog):
             return None, None
         return user.id, user.display_name
 
-    async def get_random_clue(self):
+    async def get_random_clue(self, get_category=False):
         for _ in range(100):
             clue_id = random.randint(1, CLUE_AMOUNT)
             clue = await jservice_get_json(self.session, 'clues/{}.json'.format(clue_id))
@@ -254,8 +261,12 @@ class GameCog(commands.Cog):
                 continue
             clue = Clue(**fix_id(clue))
             category = await jservice_get_json(self.session, 'categories/{}.json'.format(clue.category_id))
-            category = Category(**fix_id(category))
-            return clue, category
+            category['title'] = category['title'].upper()
+            clue.category_title = category['title']
+            if get_category:
+                category = Category(**fix_id(category))
+                return clue, category
+            return clue
 
     async def end_jeopardy_clue(self, ctx, jdict, question, clue):
         await mark_as_answered(ctx, jdict, clue)
@@ -299,22 +310,19 @@ class GameCog(commands.Cog):
             return
         clue = next_clue
         category_index, clue_index = get_clue_index(jdict, clue)
-        title = jdict['categories'][category_index].title
         if clue.id_ in jdict['daily doubles']:
-            await self.daily_double(ctx, clue, title)
+            await self.daily_double(ctx, clue)
         else:
-            await self.play(ctx, clue, title, jeopardy_mode=True)
+            await self.play(ctx, clue, jeopardy_mode=True)
 
 
-    async def play(self, ctx, clue, title, jeopardy_mode=False):
+    async def play(self, ctx, clue, jeopardy_mode=False):
         channel = self.get_channel(ctx.channel.id)
         if channel['active']:
             await ctx.send("There's already an active question in this channel.")
             return
         channel['active'] = True
-        clue.airdate = clue.airdate[5:7] + "/" + clue.airdate[2:4]
-        question = (f'The category is **{title.upper()}** for $' +
-                    '{0.value}: `{0.category_id}:{0.id_}` ({0.airdate})\n```\n{0.question}```'.format(clue))
+        question = clue.question_to_str()
 
         question = await ctx.send(question)
         correct_answers = get_possible_answers(clue.answer)
@@ -443,7 +451,7 @@ class GameCog(commands.Cog):
             ctx.message.content = "repeat clue"
             await self.clue.invoke(ctx)
 
-    async def daily_double(self, ctx, clue, title):
+    async def daily_double(self, ctx, clue):
         channel = self.get_channel(ctx.channel.id)
         if channel['active']:
             await ctx.send("There's already an active question in this channel.")
@@ -472,9 +480,7 @@ class GameCog(commands.Cog):
                     break
                 await ctx.send(f"Bet between $5 and ${max_bet}")
         await ctx.send(f"You've bet ${bet}.")
-        clue.airdate = clue.airdate[5:7] + "/" + clue.airdate[2:4]
-        question = (f'The category is **{title.upper()}** for $' +
-                    '{0.value}: `{0.category_id}:{0.id_}` ({0.airdate})\n```\n{0.question}```'.format(clue))
+        question = clue.question_to_str()
 
         await ctx.send(question)
         correct_answers = get_possible_answers(clue.answer)
@@ -529,8 +535,7 @@ class GameCog(commands.Cog):
             await ctx.send("There's already an active question in this channel.")
             return
         if clue_id is None:
-            clue, category = await self.get_random_clue()
-            title = category.title
+            clue = await self.get_random_clue()
         else:
             try:
                 clue_id = int(clue_id)
@@ -546,10 +551,9 @@ class GameCog(commands.Cog):
                 return
             clue = Clue(**fix_id(clue))
             category = await jservice_get_json(self.session, 'categories/{}.json'.format(clue.category_id))
-            category = Category(**fix_id(category))
-            title = category.title
+            clue.category_title = category['title'].upper()
 
-        await self.play(ctx, clue, title)
+        await self.play(ctx, clue)
 
     @commands.command()
     async def find(self, ctx, cid='any', value='any'):
@@ -577,8 +581,7 @@ class GameCog(commands.Cog):
                 await ctx.send("The value needs to be a number or `any`.")
                 return
         if cid == 'any' and value == 'any':
-            clue, category = await self.get_random_clue()
-            title = category.title
+            clue = await self.get_random_clue()
         elif cid == 'any': # and value!='any'
             await ctx.send("You currently can't search for a value with no category specified, sorry.")
         elif value == 'any' or value == 0: # and cid!='any'
@@ -596,9 +599,7 @@ class GameCog(commands.Cog):
                     await ctx.send("This category doesn't seem to have any valid clues.")
                 return
             clue = random.choice(clues)
-            del category['clues']
-            category = Category(**fix_id(category))
-            title = category.title
+            clue.category_title = category['title'].upper()
         else:   # cid != 'any' and value != 'any' and value != 0
             category = await jservice_get_json(self.session, 'api/category',
                                                {'id':cid})
@@ -610,11 +611,9 @@ class GameCog(commands.Cog):
             if not clues:
                 return await ctx.send("This category doesn't seem to have any valid clues with that category and value.")
             clue = random.choice(clues)
-            del category['clues']
-            category = Category(**fix_id(category))
-            title = category.title
+            clue.category_title = category['title'].upper()
 
-        await self.play(ctx, clue, title)
+        await self.play(ctx, clue)
 
     async def togglemode(self, ctx, mode):
         channel = self.get_channel(ctx.channel.id)
@@ -675,9 +674,11 @@ class GameCog(commands.Cog):
             if len(valid_clues) >= 5:
                 break
         clues = [None]*5
+        category['title'] = category['title'].upper()
         for i in range(5):
             clue = valid_clues.pop(random.randint(0,len(valid_clues)-1))
             clues[i] = Clue(**fix_id(clue))
+            clues[i].category_title = category['title']
         del category['clues']
         category = Category(**fix_id(category))
         return category, clues
@@ -747,6 +748,7 @@ class GameCog(commands.Cog):
                     await ctx.send('That category has already been added.')
                     break
                 category = await jservice_get_json(self.session, f'categories/{category_id}.json')
+                category['title'] = category['title'].upper()
                 category = Category(**fix_id(category))
             elif category_id != clue.category_id:
                 await ctx.send(f"All clues should share the same category, clue number {i+1} (`{clue_id}`) doesn't have the same category as the previous clues.")
@@ -754,6 +756,7 @@ class GameCog(commands.Cog):
             elif same_id(jdict['final'], clue):
                 await ctx.send(f'`{clue_id}` is already the **Final Jeopardy!** clue.')
             clues[i] = Clue(**fix_id(clue))
+            clues[i].category_title = category['title']
         else:
             result = add_jeopardy_clues(jdict, category_index, category, clues)
             await ctx.send(result)
@@ -767,7 +770,7 @@ class GameCog(commands.Cog):
         jdict['modifying'] = True
         if clue_id is None:
             while True:
-                clue, category = await self.get_random_clue()
+                clue, category = await self.get_random_clue(get_category=True)
                 if not clue_in_jeopardy(jdict, clue.id):
                     break
             clue.answered = False
@@ -796,6 +799,8 @@ class GameCog(commands.Cog):
                 if not category:
                     await ctx.send("Somehow that clue doesn't belong to a valid category.")
                 else:
+                    category['title'] = category['title'].upper()
+                    clue.category_title = category['title']
                     category = Category(**fix_id(category))
                     clue.answered = False
                     jdict['final'] = clue
@@ -1047,7 +1052,6 @@ class GameCog(commands.Cog):
 
         clue = jdict['final']
         category = jdict['final_category']
-        title = category.title
 
         correct_answers = get_possible_answers(clue.answer)
         number_clue = [True for x in correct_answers]
@@ -1064,9 +1068,7 @@ class GameCog(commands.Cog):
                     message.content.lower().startswith(answer_starts) and
                     not message.content.lower().startswith("skip clue"))
 
-        clue.airdate = clue.airdate[5:7] + "/" + clue.airdate[2:4]
-        question = (f'The category is **{title.upper()}**: ' +
-                    '`{0.category_id}:{0.id_}` ({0.airdate})\n```\n{0.question}```'.format(clue))
+        question = clue.question_to_str()
 
         await ctx.send(question)
         for player in players.values():
@@ -1164,7 +1166,7 @@ class GameCog(commands.Cog):
         if jdict['leader'] != ctx.author.id:
             await ctx.send("Only the current leader can choose a clue.")
             return
-        clue = clue.lower().split()
+        clue = clue.upper().split()
         if len(clue) == 1:
             await ctx.send("The format is `take <category> <value>`")
             return
@@ -1212,11 +1214,10 @@ class GameCog(commands.Cog):
         if clue.answered:
             await ctx.send("That clue has already been answered.")
             return
-        title = jdict['categories'][category_index].title
         if clue.id in jdict['daily doubles']:
-            await self.daily_double(ctx, clue, title)
+            await self.daily_double(ctx, clue)
         else:
-            await self.play(ctx, clue, title, jeopardy_mode=True)
+            await self.play(ctx, clue, jeopardy_mode=True)
 
 
     @commands.command(hidden=True)
