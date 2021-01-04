@@ -13,10 +13,11 @@ initial_extensions = ['cogs.browser',
                       'cogs.role',
                       'cogs.autodelete']
 
-
+intents = discord.Intents.default()
+intents.members = True
 logging.basicConfig(filename='jeopardy.log', level=logging.INFO)
 prefix = ("t.", "T.")
-bot = commands.Bot(command_prefix=prefix)
+bot = commands.Bot(command_prefix=prefix, intents=intents)
 
 if __name__ == '__main__':
     for extension in initial_extensions:
